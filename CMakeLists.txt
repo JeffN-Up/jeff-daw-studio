@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 4.2)
 project(JeffDawStudio VERSION 0.1.0 LANGUAGES CXX)
 option(JDS_BUILD_TESTS "Build tests" ON)
 if(WIN32)
