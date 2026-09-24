@@ -1,0 +1,3 @@
+#include "transport/TransportClock.h"
+#include <algorithm>
+namespace jeff::daw {void TransportClock::prepare(double r)noexcept{rate=r>0?r:44100;reset();}void TransportClock::setTempo(double b)noexcept{bpm=std::clamp(b,20.0,300.0);}void TransportClock::reset()noexcept{position=0;nextClick=0;}TransportBlock TransportClock::process(int n)noexcept{TransportBlock b{position,position,playing};if(!playing||n<=0)return b;auto end=position+n;if(metro){auto beat=rate*60.0/bpm;while(nextClick<end){if(nextClick>=position&&b.clickCount<b.clickOffsets.size())b.clickOffsets[b.clickCount++]=static_cast<int>(nextClick-position);nextClick+=beat;}}position=end;b.endSample=end;return b;}}

@@ -1,0 +1,25 @@
+name: Windows Foundation
+on:
+  push:
+    branches: [main, feature/audio-midi-foundation]
+  pull_request:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: 4.4.0
+      - name: Configure
+        run: cmake -S . -B build -DJDS_BUILD_TESTS=ON -DJDS_BUILD_APP=ON
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Stage portable app
+        run: cmake --install build --config Release --prefix package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Jeff-DAW-Studio-Windows-foundation
+          path: package

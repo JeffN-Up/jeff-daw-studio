@@ -1,0 +1,5 @@
+add_executable(JeffDawTests FoundationTests.cpp ${JDS_CORE_SOURCES})
+target_include_directories(JeffDawTests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(JeffDawTests PRIVATE Catch2::Catch2WithMain)
+include(Catch)
+catch_discover_tests(JeffDawTests)
