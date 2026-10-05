@@ -6,7 +6,7 @@ catch_discover_tests(JeffDawTests)
 
 if(JDS_BUILD_APP)
   add_executable(JeffDawJuceImportTests StemImportTests.cpp JuceStemDecoderTests.cpp StretchTests.cpp
-    ${PROJECT_SOURCE_DIR}/src/stems/JuceStemDecoder.cpp ${JDS_CORE_SOURCES})
+    ${PROJECT_SOURCE_DIR}/src/stems/JuceStemDecoder.cpp ${PROJECT_SOURCE_DIR}/src/stems/JuceFlacIntegrity.cpp ${JDS_CORE_SOURCES})
   target_include_directories(JeffDawJuceImportTests PRIVATE ${PROJECT_SOURCE_DIR}/src)
   target_compile_definitions(JeffDawJuceImportTests PRIVATE JDS_TEST_JUCE_IMPORT=1
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1

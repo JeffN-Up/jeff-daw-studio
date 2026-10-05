@@ -1,4 +1,5 @@
 #include "stems/JuceStemDecoder.h"
+#include "stems/JuceFlacIntegrity.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <cmath>
 #include <limits>
@@ -73,16 +74,49 @@ namespace jeff::daw {
     auto stream=std::make_unique<CheckedFileStream>(juce::File(juce::String::fromUTF8(reinterpret_cast<const char*>(utf8.data()),int(utf8.size()))));
     if(stream->failed()) return R::failure(ErrorCode::readFailure,"Cannot open original audio.");
     auto* checked=stream.get();
+    std::optional<VerifiedFlac> flac;
+    char signature[4]{};
+    const int signatureBytes=stream->read(signature,4);
+    if(stream->failed() || !stream->setPosition(0)) return R::failure(ErrorCode::readFailure,"Cannot inspect original audio signature.");
+#if JUCE_USE_FLAC
+    if(signatureBytes==4 && std::equal(signature,signature+4,"fLaC")) {
+      auto verified=verifyFlac(*stream,token,[checked]{return checked->failed();});
+      if(!verified) return R::failure(verified.error().code,verified.error().message);
+      flac=verified.value();
+    }
+#endif
     juce::AudioFormatManager formats;
     juce::WavAudioFormat wav;
     juce::AiffAudioFormat aiff;
     const auto wavName=wav.getFormatName(),aiffName=aiff.getFormatName();
     formats.registerFormat(new juce::WavAudioFormat,true);
     formats.registerFormat(new juce::AiffAudioFormat,false);
+#if JUCE_USE_FLAC
     formats.registerFormat(new juce::FlacAudioFormat,false);
+#endif
     formats.registerFormat(new juce::MP3AudioFormat,false);
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(std::move(stream)));
     if(!reader) return R::failure(ErrorCode::decodeFailure,"Unsupported or corrupt audio; expected WAV, AIFF, FLAC or MP3.");
+#if JUCE_USE_FLAC
+    if(!flac && reader->getFormatName()==juce::FlacAudioFormat{}.getFormatName()) {
+      // JUCE/libFLAC can recognise a tagged stream whose first bytes aren't
+      // fLaC. Verify it too, then rebuild the reader so its buffered decoder
+      // state agrees with the stream position after the sequential pass.
+      std::unique_ptr<juce::InputStream> owned(reader->input);
+      reader->input=nullptr;
+      reader.reset();
+      auto verified=verifyFlac(*owned,token,[checked]{return checked->failed();});
+      if(!verified) return R::failure(verified.error().code,verified.error().message);
+      flac=verified.value();
+      reader.reset(formats.createReaderFor(std::move(owned)));
+      if(!reader) return R::failure(ErrorCode::decodeFailure,"Cannot reopen validated FLAC decoding.");
+    }
+#endif
+    if(flac) {
+      if(reader->numChannels!=unsigned(flac->channels) || reader->sampleRate!=flac->sampleRate)
+        return R::failure(ErrorCode::decodeFailure,"FLAC reader metadata disagrees with the validated stream.");
+      reader->lengthInSamples=flac->frames; // Preserve verified 64-bit totals, including unknown STREAMINFO length.
+    }
     if(!std::isfinite(reader->sampleRate)
         || reader->sampleRate<=0
         || reader->sampleRate>std::numeric_limits<int>::max()
