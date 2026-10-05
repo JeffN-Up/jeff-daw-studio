@@ -73,7 +73,7 @@ TEST_CASE("JuceSampleReaderKeepsOwnedSessionAndChecksRandomReads", "[stretch][ju
 namespace {
 void writeIntegrityFlac(const std::filesystem::path& path, bool silent) {
   juce::FlacAudioFormat format;
-  auto output = file(path).createOutputStream(); REQUIRE(output);
+  std::unique_ptr<juce::OutputStream> output = file(path).createOutputStream(); REQUIRE(output);
   const auto options = juce::AudioFormatWriterOptions{}.withSampleRate(48000).withNumChannels(2).withBitsPerSample(16);
   auto writer = format.createWriterFor(output, options); REQUIRE(writer);
   juce::AudioBuffer<float> buffer(2, 8192); buffer.clear();
@@ -155,7 +155,10 @@ TEST_CASE("JuceFlacIntegrityRejectsTruncationWithoutRejectingSilence", "[stretch
   }
   SECTION("valid encoded audio and legitimate silence succeed") {
     const auto silentPath = temp.root / "silent-flac"; writeIntegrityFlac(silentPath, true);
-    for (const auto& path : {validPath, silentPath}) {
+    const auto noDigestPath = temp.root / "no-md5-flac";
+    auto noDigest = validBytes; std::fill(noDigest.begin() + 26, noDigest.begin() + 42, char(0));
+    { std::ofstream out(noDigestPath, std::ios::binary); out.write(noDigest.data(), noDigest.size()); }
+    for (const auto& path : {validPath, silentPath, noDigestPath}) {
       auto inspected = decoder.inspect(path, token, 128); INFO((inspected ? "OK" : inspected.error().message)); REQUIRE(inspected);
       REQUIRE(inspected.value().frameCount == 8192);
       auto opened = decoder.openReader(path, token); REQUIRE(opened);
@@ -164,5 +167,17 @@ TEST_CASE("JuceFlacIntegrityRejectsTruncationWithoutRejectingSilence", "[stretch
       if (path == silentPath) REQUIRE(block.getMagnitude(0, 8192) == 0);
       else REQUIRE(block.getMagnitude(0, 8192) > .1f);
     }
+  }
+  SECTION("frame corruption with intact metadata fails") {
+    auto corrupted = validBytes; corrupted[corrupted.size() - 3] ^= char(0x40);
+    const auto path = temp.root / "corrupt-flac";
+    { std::ofstream out(path, std::ios::binary); out.write(corrupted.data(), corrupted.size()); }
+    REQUIRE(corrupted.substr(0, audioStart) == validBytes.substr(0, audioStart));
+    auto opened = decoder.openReader(path, token);
+    if (opened) {
+      juce::AudioBuffer<float> block(2, 8192);
+      auto decoded = opened.value()->read(0, 8192, std::span<float* const>(block.getArrayOfWritePointers(), 2), token);
+      REQUIRE_FALSE(decoded); REQUIRE(decoded.error().code == ErrorCode::decodeFailure);
+    } else REQUIRE(opened.error().code == ErrorCode::decodeFailure);
   }
 }
