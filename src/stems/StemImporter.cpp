@@ -18,6 +18,15 @@ ImportReport StemImporter::import(const std::vector<InputStreamFactory>& inputs,
   for (const auto& input : inputs) report.files.push_back({input.displayName, {}, {}, {}});
   std::vector<std::optional<MediaStore::StagedMedia>> stages(inputs.size());
   std::vector<DecodedAudio> decoded(inputs.size());
+  auto discardStage = [&](std::size_t i) {
+    if (!stages[i] || report.files[i].unresolvedStaging) return;
+    const auto cleaned = store.discard(*stages[i]);
+    if (cleaned) { stages[i].reset(); return; }
+    auto& file = report.files[i];
+    file.unresolvedStaging = PendingStagedCleanup{stages[i]->id(), ".import/" + stages[i]->id(), cleaned.error()};
+    if (file.error) file.error->message += " Staging cleanup failed: " + cleaned.error().message;
+    else file.error = cleaned.error();
+  };
   for (std::size_t i = 0; i < inputs.size() && !token.isCancelled(); ++i) {
     try {
       auto copied = store.stage(inputs[i], token, [&](std::uint64_t bytes) {
@@ -27,16 +36,17 @@ ImportReport StemImporter::import(const std::vector<InputStreamFactory>& inputs,
       stages[i].emplace(std::move(copied.value()));
       if (progress) progress({i, inputs.size(), inputs[i].displayName, stages[i]->byteCount(), inputs[i].expectedBytes, ImportPhase::decoding});
       auto audio = decoder_.inspect(stages[i]->path(), token, limits_.maxWaveformBins);
-      if (!audio) { report.files[i].error = audio.error(); continue; }
+      if (!audio) { report.files[i].error = audio.error(); discardStage(i); continue; }
       const auto& metadata = audio.value();
       bool valid = metadata.channels > 0 && metadata.channels <= 64 && metadata.sourceRate > 0 && metadata.frameCount > 0 &&
                    !metadata.waveform.empty() && metadata.waveform.size() <= limits_.maxWaveformBins;
       for (const auto& bin : metadata.waveform)
         valid = valid && std::isfinite(bin.minimum) && std::isfinite(bin.maximum) && std::isfinite(bin.rms) && bin.minimum <= bin.maximum && bin.rms >= 0;
-      if (!valid) { report.files[i].error = Error{ErrorCode::decodeFailure, "Decoder returned invalid audio metadata or waveform."}; continue; }
+      if (!valid) { report.files[i].error = Error{ErrorCode::decodeFailure, "Decoder returned invalid audio metadata or waveform."}; discardStage(i); continue; }
       decoded[i] = std::move(audio.value());
     } catch (const std::exception& error) {
       report.files[i].error = Error{ErrorCode::readFailure, "Import failed: " + std::string(error.what())};
+      discardStage(i);
     }
   }
   // Publication is delayed until copying and full decoding have finished. A late
@@ -46,10 +56,11 @@ ImportReport StemImporter::import(const std::vector<InputStreamFactory>& inputs,
     try {
       if (progress) progress({i, inputs.size(), inputs[i].displayName, stages[i]->byteCount(), inputs[i].expectedBytes, ImportPhase::committing});
       auto committed = store.commit(*stages[i], decoded[i].channels, decoded[i].sourceRate, decoded[i].frameCount, &token);
-      if (!committed) report.files[i].error = committed.error();
+      if (!committed) { report.files[i].error = committed.error(); discardStage(i); }
       else { report.files[i].asset = std::move(committed.value()); report.files[i].waveform = std::move(decoded[i].waveform); }
     } catch (const std::exception& error) {
       report.files[i].error = Error{ErrorCode::writeFailure, "Import publication failed: " + std::string(error.what())};
+      discardStage(i);
     }
   }
   if (token.isCancelled()) {
@@ -63,17 +74,11 @@ ImportReport StemImporter::import(const std::vector<InputStreamFactory>& inputs,
       if (!file.error) file.error = Error{ErrorCode::cancelled, "Import batch cancelled."};
     }
   }
-  // Explicitly discard all uncommitted copies, including rejected decoder input,
-  // failed publication and cancellation. Destruction alone cannot report errors.
+  // Rejected copies were already released before advancing to the next file.
+  // Discard remaining cancelled copies; retain any earlier unresolved cleanup
+  // record for an explicit caller retry rather than losing it at batch exit.
   for (std::size_t i = 0; i < stages.size(); ++i) {
-    if (!stages[i]) continue;
-    const auto cleaned = store.discard(*stages[i]);
-    if (!cleaned) {
-      auto& file = report.files[i];
-      file.unresolvedStaging = PendingStagedCleanup{stages[i]->id(), ".import/" + stages[i]->id(), cleaned.error()};
-      if (file.error) file.error->message += " Staging cleanup failed: " + cleaned.error().message;
-      else file.error = cleaned.error();
-    }
+    discardStage(i);
   }
   return report;
 }

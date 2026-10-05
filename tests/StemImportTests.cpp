@@ -243,4 +243,28 @@ TEST_CASE("StagedCleanupFailureReportsIdentityAndCanBeRetried", "[stem-import]")
   lock.release(); REQUIRE(store.retryStagedCleanup(pending));
   REQUIRE(entries(temp.root / ".import") == 0); REQUIRE(entries(temp.root / "media") == 0);
 }
-
+TEST_CASE("RejectedStagesAreRemovedBeforeOpeningNextProvider", "[stem-import]") {
+  Temp temp; MediaStore store(temp.root); TestDecoder decoder; StemImporter importer(decoder); CancellationToken token;
+  bool throwProgress = false;
+  SECTION("corrupt original") {}
+  SECTION("progress exception after copy") { throwProgress = true; }
+  std::filesystem::path rejectedDirectory;
+  bool openedNext = false, removedBeforeNext = false;
+  auto next = source("valid.wav", wav());
+  auto originalOpen = next.open;
+  next.open = [&] {
+    openedNext = true;
+    removedBeforeNext = !rejectedDirectory.empty() && !std::filesystem::exists(rejectedDirectory) && entries(temp.root / ".import") == 1;
+    return originalOpen();
+  };
+  auto report = importer.import({source("rejected.wav", throwProgress ? wav() : std::string(65536, '!')), next}, store, token,
+    [&](const ImportProgress& p) {
+      if (p.fileIndex == 0 && p.phase == ImportPhase::decoding) {
+        rejectedDirectory = std::filesystem::directory_iterator(temp.root / ".import")->path();
+        if (throwProgress) throw std::runtime_error("Consumer progress failure.");
+      }
+    });
+  REQUIRE(openedNext); REQUIRE(removedBeforeNext); REQUIRE(report.files[0].error); REQUIRE_FALSE(report.files[0].asset);
+  REQUIRE_FALSE(report.files[0].unresolvedStaging); REQUIRE(report.files[1].asset); REQUIRE_FALSE(report.files[1].error);
+  REQUIRE(entries(temp.root / ".import") == 0); REQUIRE(entries(temp.root / "media") == 1);
+}
