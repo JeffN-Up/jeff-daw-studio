@@ -396,8 +396,9 @@ namespace jeff::daw {
       });
       if(group==p.groups.end()) return R::failure(ErrorCode::missingEntity,"Timing group does not exist.");
       std::vector<StretchMember> members;
-      double origin=std::numeric_limits<double>::infinity();
-      for(const auto& t:p.tracks) if(t.timingGroupId==groupId) origin=std::min(origin,t.placementBeats);
+      auto groupOrigin=groupOriginBeats(p,groupId);
+      if(!groupOrigin) return R::failure(groupOrigin.error().code,groupOrigin.error().message);
+      const double origin=groupOrigin.value();
       auto effective=options;
       effective.mode=group->mode;
       const double startBeat=group->mode==TimingMode::preserve ? 0 : mapTime(group->timingMap,0);
@@ -406,21 +407,10 @@ namespace jeff::daw {
         const auto asset=std::find_if(p.assets.begin(),p.assets.end(),[&](const auto& a){
           return a.id==t.assetId;
         });
-        double offset=(t.placementBeats-origin)*60/p.tempoBpm;
-        // Keep project beat placement while placing channels on a shared source grid.
-        if(group->mode!=TimingMode::preserve) {
-          const double beat=startBeat+t.placementBeats-origin;
-          const auto& markers=group->timingMap.markers;
-          const auto after=std::upper_bound(markers.begin(),markers.end(),beat,[](double v,const auto& m){
-            return v<m.destinationBeats;
-          });
-          const auto right=after==markers.begin() ? 1 : after==markers.end() ? markers.size()-1 : std::size_t(after-markers.begin());
-          const auto& a=markers[right-1];
-          const auto& b=markers[right];
-          offset=a.sourceSeconds+(beat-a.destinationBeats)*(b.sourceSeconds-a.sourceSeconds)/(b.destinationBeats-a.destinationBeats);
-        }
+        auto offset=sourceGridOffset(p,t);
+        if(!offset) return R::failure(offset.error().code,offset.error().message);
         members.push_back({
-          *asset,offset,t.trimStartSeconds,t.trimEndSeconds,t.id
+          *asset,offset.value(),t.trimStartSeconds,t.trimEndSeconds,t.id
         });
       }
       auto prepared=prepareGroup(members,group->timingMap,p.tempoBpm,store,token,effective);

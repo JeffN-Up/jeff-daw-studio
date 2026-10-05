@@ -72,4 +72,10 @@ struct Project {
 
 Result<void> validate(const Project& project);
 
+// Checked background source-grid contract shared by rendering and alignment.
+// Group origin is its minimum track placement; Preserve follows project tempo.
+Result<double> groupOriginBeats(const Project&, const Id& groupId);
+Result<double> sourceGridOffset(const Project&, const Track&);
+Result<double> sourceTimeToProjectBeat(const Project&, const Track&, double sourceSeconds);
+
 } // namespace jeff::daw

@@ -15,6 +15,7 @@ set(JDS_CORE_SOURCES
   src/project/Types.cpp src/project/Project.cpp src/project/ProjectCommands.cpp
   src/project/MediaStore.cpp src/stems/StemImporter.cpp
   src/stems/TimingMap.cpp src/stems/StretchRenderer.cpp
+  src/stems/BeatAnalyzer.cpp src/stems/SyncProposal.cpp src/stems/SyncService.cpp
   src/transport/TransportClock.cpp src/ui/OrbaLayout.cpp src/ui/OrbaMirrorModel.cpp
   src/ui/DeviceCenterModel.cpp)
 list(TRANSFORM JDS_CORE_SOURCES PREPEND "${PROJECT_SOURCE_DIR}/")

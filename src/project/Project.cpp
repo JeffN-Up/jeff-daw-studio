@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <unordered_set>
+#include <limits>
+#include <stdexcept>
 
 namespace jeff::daw {
 namespace {
@@ -87,5 +89,62 @@ Result<void> validate(const Project& project) {
       return invalid("Source tempo and downbeat must be valid source timing values.");
   }
   return Result<void>::success();
+}
+Result<double> groupOriginBeats(const Project& project, const Id& groupId) {
+  double origin = std::numeric_limits<double>::infinity();
+  for (const auto& track : project.tracks)
+    if (track.timingGroupId == groupId) origin = std::min(origin, track.placementBeats);
+  if (!std::isfinite(origin)) return Result<double>::failure(ErrorCode::missingEntity, "Timing group has no finite member placement.");
+  return Result<double>::success(origin);
+}
+
+Result<double> sourceGridOffset(const Project& project, const Track& track) {
+  using R = Result<double>;
+  const auto* group = find(project.groups, track.timingGroupId);
+  if (!group) return R::failure(ErrorCode::missingEntity, "Track timing group does not exist.");
+  auto origin = groupOriginBeats(project, group->id);
+  if (!origin) return origin;
+  if (!std::isfinite(project.tempoBpm) || project.tempoBpm <= 0 || !std::isfinite(track.placementBeats))
+    return R::failure(ErrorCode::invalidProject, "Source grid needs finite placement and positive tempo.");
+  try {
+    if (group->mode == TimingMode::preserve) {
+      const double offset = (track.placementBeats - origin.value()) * 60 / project.tempoBpm;
+      if (!std::isfinite(offset)) throw std::overflow_error("Source grid offset overflow.");
+      return R::success(offset);
+    }
+    const auto valid = validate(group->timingMap);
+    if (!valid) return R::failure(valid.error().code, valid.error().message);
+    const double beat = mapTime(group->timingMap, 0) + track.placementBeats - origin.value();
+    const auto& markers = group->timingMap.markers;
+    const auto after = std::upper_bound(markers.begin(), markers.end(), beat,
+        [](double v, const auto& marker) { return v < marker.destinationBeats; });
+    const auto right = after == markers.begin() ? 1 : after == markers.end() ? markers.size()-1 : std::size_t(after-markers.begin());
+    const auto& a = markers[right-1];
+    const auto& b = markers[right];
+    const double offset = std::lerp(a.sourceSeconds, b.sourceSeconds,
+        (beat-a.destinationBeats)/(b.destinationBeats-a.destinationBeats));
+    if (!std::isfinite(offset) || !std::isfinite(beat)) throw std::overflow_error("Source grid offset overflow.");
+    return R::success(offset);
+  } catch (const std::exception& e) {
+    return R::failure(ErrorCode::invalidTimingMap, e.what());
+  }
+}
+
+Result<double> sourceTimeToProjectBeat(const Project& project, const Track& track, double seconds) {
+  using R = Result<double>;
+  auto offset = sourceGridOffset(project, track);
+  if (!offset) return offset;
+  auto origin = groupOriginBeats(project, track.timingGroupId);
+  if (!origin) return origin;
+  const auto* group = find(project.groups, track.timingGroupId);
+  try {
+    const double beat = origin.value() + (group->mode == TimingMode::preserve
+        ? (offset.value()+seconds)*project.tempoBpm/60
+        : mapTime(group->timingMap, offset.value()+seconds));
+    if (!std::isfinite(seconds) || !std::isfinite(beat)) throw std::overflow_error("Source grid position overflow.");
+    return R::success(beat);
+  } catch (const std::exception& e) {
+    return R::failure(ErrorCode::invalidTimingMap, e.what());
+  }
 }
 } // namespace jeff::daw
