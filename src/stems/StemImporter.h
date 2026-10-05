@@ -13,11 +13,25 @@ struct DecodedAudio {
   Frame frameCount = 0;
   std::vector<WaveformBin> waveform;
 };
+// Owned background-reader session. read() fills exactly the requested frames;
+// a short/failed decode is an error. Planes have metadata().channels entries.
+class AudioSampleReader {
+public:
+  virtual ~AudioSampleReader() = default;
+  virtual const DecodedAudio& metadata() const noexcept = 0;
+  virtual Result<void> read(Frame start, int frames, std::span<float* const> planes,
+                            CancellationToken&) = 0;
+};
 class AudioDecoder {
 public:
   virtual ~AudioDecoder() = default;
   virtual Result<DecodedAudio> inspect(const std::filesystem::path& stagedOriginal,
                                        CancellationToken&, std::size_t maxWaveformBins) = 0;
+  // Inspect-only adapters remain compatible, but cannot prepare playable audio.
+  virtual Result<std::unique_ptr<AudioSampleReader>> openReader(const std::filesystem::path&,
+                                                               CancellationToken&) {
+    return Result<std::unique_ptr<AudioSampleReader>>::failure(ErrorCode::decodeFailure, "This decoder has no sample reader.");
+  }
 };
 enum class ImportPhase { copying, decoding, committing };
 struct ImportProgress {

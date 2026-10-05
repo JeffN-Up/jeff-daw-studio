@@ -14,7 +14,7 @@ set(JDS_CORE_SOURCES
   src/audio/AudioEngine.cpp src/midi/DeviceProfile.cpp src/midi/MidiDeviceService.cpp
   src/project/Types.cpp src/project/Project.cpp src/project/ProjectCommands.cpp
   src/project/MediaStore.cpp src/stems/StemImporter.cpp
-  src/stems/TimingMap.cpp
+  src/stems/TimingMap.cpp src/stems/StretchRenderer.cpp
   src/transport/TransportClock.cpp src/ui/OrbaLayout.cpp src/ui/OrbaMirrorModel.cpp
   src/ui/DeviceCenterModel.cpp)
 list(TRANSFORM JDS_CORE_SOURCES PREPEND "${PROJECT_SOURCE_DIR}/")
@@ -26,9 +26,10 @@ if(JDS_BUILD_APP)
     src/ui/TransportComponent.cpp src/ui/DeviceCenterComponent.cpp ${JDS_CORE_SOURCES})
   target_include_directories(JeffDawStudio PRIVATE src)
   target_compile_definitions(JeffDawStudio PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1)
-  target_link_libraries(JeffDawStudio PRIVATE juce::juce_audio_utils juce::juce_gui_extra
+  target_link_libraries(JeffDawStudio PRIVATE signalsmith-stretch juce::juce_audio_utils juce::juce_gui_extra
     juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
   install(TARGETS JeffDawStudio RUNTIME DESTINATION "Jeff DAW Studio" BUNDLE DESTINATION "Jeff DAW Studio")
+  install(FILES LICENSE THIRD_PARTY_NOTICES.md DESTINATION "Jeff DAW Studio")
 endif()
 if(JDS_BUILD_TESTS)
   enable_testing()

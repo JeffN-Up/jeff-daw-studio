@@ -8,5 +8,6 @@ namespace jeff::daw {
 class JuceStemDecoder final : public AudioDecoder {
 public:
   Result<DecodedAudio> inspect(const std::filesystem::path&, CancellationToken&, std::size_t maxWaveformBins) override;
+  Result<std::unique_ptr<AudioSampleReader>> openReader(const std::filesystem::path&, CancellationToken&) override;
 };
 } // namespace jeff::daw

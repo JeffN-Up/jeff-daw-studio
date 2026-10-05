@@ -56,3 +56,14 @@ TEST_CASE("JuceDecoderRejectsTruncatedPcmInsteadOfPaddingSilence", "[stem-import
   auto result = decoder.inspect(path, token, 128);
   REQUIRE_FALSE(result); REQUIRE(result.error().code == ErrorCode::decodeFailure);
 }
+
+TEST_CASE("JuceSampleReaderKeepsOwnedSessionAndChecksRandomReads", "[stretch][juce-decoder]") {
+  NativeTemp temp;JuceStemDecoder decoder;CancellationToken token;juce::WavAudioFormat wav;
+  const auto path=temp.root/"samples";writeFixture(wav,path,2,48000);auto opened=decoder.openReader(path,token);REQUIRE(opened);
+  auto& reader=*opened.value();REQUIRE(reader.metadata().frameCount==8192);juce::AudioBuffer<float> block(2,64);
+  auto planes=std::span<float* const>(block.getArrayOfWritePointers(),2);
+  REQUIRE(reader.read(6000,64,planes,token));REQUIRE(block.getSample(0,0)==Catch::Approx(.5));REQUIRE(block.getSample(1,0)==Catch::Approx(-.5));
+  REQUIRE(reader.read(0,64,planes,token));REQUIRE(block.getSample(0,0)==0);
+  auto outside=reader.read(8191,64,planes,token);REQUIRE_FALSE(outside);REQUIRE(outside.error().code==ErrorCode::decodeFailure);
+  token.cancel();auto cancelled=reader.read(0,64,planes,token);REQUIRE_FALSE(cancelled);REQUIRE(cancelled.error().code==ErrorCode::cancelled);
+}
