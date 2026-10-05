@@ -139,6 +139,49 @@ TEST_CASE("MediaChecksumUsesSha256", "[stem-import]") {
   Temp temp; MediaStore store(temp.root); CancellationToken token;
   auto staged = store.stage(source("hash", "abc"), token);
   REQUIRE(staged); REQUIRE(staged.value().checksum() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  auto longVector = store.stage(source("hash", "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"), token);
+  REQUIRE(longVector); REQUIRE(longVector.value().checksum() == "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
+}
+TEST_CASE("ProviderLengthMismatchDoesNotCommitPartialMedia", "[stem-import]") {
+  Temp temp; MediaStore store(temp.root); TestDecoder decoder; StemImporter importer(decoder); CancellationToken token;
+  auto shortInput = source("short.wav", wav()); shortInput.expectedBytes = *shortInput.expectedBytes + 17;
+  auto longInput = source("long.wav", wav()); longInput.expectedBytes = 17;
+  auto report = importer.import({shortInput, longInput}, store, token);
+  for (const auto& f : report.files) { REQUIRE_FALSE(f.asset); REQUIRE(f.error); REQUIRE(f.error->code == ErrorCode::readFailure); }
+  REQUIRE(entries(temp.root / "media") == 0); REQUIRE(entries(temp.root / ".import") == 0);
+}
+TEST_CASE("ImportCancellationDuringDecodePreservesExistingMedia", "[stem-import]") {
+  Temp temp; MediaStore store(temp.root); TestDecoder decoder; StemImporter importer(decoder); CancellationToken first;
+  auto existing = importer.import({source("existing.wav", wav())}, store, first); REQUIRE(existing.files[0].asset);
+  const auto bytes = readAll(store.root() / existing.files[0].asset->relativePath);
+  CancellationToken token;
+  auto report = importer.import({source("new.wav", wav())}, store, token,
+    [&](const ImportProgress& p) { if (p.phase == ImportPhase::decoding) token.cancel(); });
+  REQUIRE(report.cancelled); REQUIRE_FALSE(report.files[0].asset);
+  REQUIRE(entries(temp.root / "media") == 1); REQUIRE(entries(temp.root / ".import") == 0);
+  REQUIRE(readAll(store.root() / existing.files[0].asset->relativePath) == bytes);
+}
+TEST_CASE("ImportBoundsRejectLargeBatchesAndRollbackPaths", "[stem-import]") {
+  Temp temp; MediaStore store(temp.root); TestDecoder decoder; StemImporter importer(decoder, {1, 32}); CancellationToken token;
+  auto report = importer.import({source("a.wav", wav()), source("b.wav", wav())}, store, token);
+  REQUIRE(report.files.size() == 2); for (const auto& f : report.files) { REQUIRE_FALSE(f.asset); REQUIRE(f.error->code == ErrorCode::storageLimit); }
+  REQUIRE_FALSE(std::filesystem::exists(temp.root / ".import"));
+  AudioAsset forged; forged.id = "../external"; forged.relativePath = "media/../external/original";
+  REQUIRE_FALSE(store.removeCommitted(forged));
+}
+TEST_CASE("ImportLateCancellationRollsBackCommittedBatch", "[stem-import]") {
+  Temp temp; MediaStore store(temp.root); TestDecoder decoder; StemImporter importer(decoder); CancellationToken token;
+  auto report = importer.import({source("first.wav", wav()), source("last.wav", wav())}, store, token,
+    [&](const ImportProgress& p) { if (p.phase == ImportPhase::committing && p.fileIndex == 1) token.cancel(); });
+  REQUIRE(report.cancelled); for (const auto& f : report.files) { REQUIRE_FALSE(f.asset); REQUIRE(f.error); }
+  REQUIRE(entries(temp.root / "media") == 0); REQUIRE(entries(temp.root / ".import") == 0);
+}
+TEST_CASE("MediaCommitRejectsOriginalChangedAfterStaging", "[stem-import]") {
+  Temp temp; MediaStore store(temp.root); CancellationToken token;
+  auto staged = store.stage(source("changed.wav", wav()), token); REQUIRE(staged);
+  { std::fstream file(staged.value().path(), std::ios::in | std::ios::out | std::ios::binary); file.seekp(44); file.put('\1'); }
+  auto result = store.commit(staged.value(), 2, 48000, 8192);
+  REQUIRE_FALSE(result); REQUIRE(result.error().code == ErrorCode::readFailure); REQUIRE(entries(temp.root / "media") == 0);
 }
 
 

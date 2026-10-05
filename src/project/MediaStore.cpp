@@ -72,6 +72,13 @@ Result<void> storageAvailable(const std::filesystem::path& root, std::uint64_t n
     return Result<void>::failure(ErrorCode::storageLimit, "Not enough free project storage.");
   return Result<void>::success();
 }
+bool withinRoot(const std::filesystem::path& root, const std::filesystem::path& path) {
+  std::error_code ec;
+  const auto canonicalRoot = std::filesystem::weakly_canonical(root, ec); if (ec) return false;
+  const auto canonicalPath = std::filesystem::weakly_canonical(path, ec); if (ec) return false;
+  const auto relative = canonicalPath.lexically_relative(canonicalRoot);
+  return !relative.empty() && !relative.is_absolute() && *relative.begin() != "..";
+}
 }
 
 MediaStore::MediaStore(std::filesystem::path root, MediaStoreLimits limits)
@@ -87,7 +94,10 @@ MediaStore::StagedMedia& MediaStore::StagedMedia::operator=(StagedMedia&& other)
   return *this;
 }
 void MediaStore::StagedMedia::clean() noexcept {
-  if (!directory_.empty()) { std::error_code ec; std::filesystem::remove_all(directory_, ec); directory_.clear(); }
+  if (!directory_.empty()) {
+    if (withinRoot(root_, directory_)) { std::error_code ec; std::filesystem::remove_all(directory_, ec); }
+    directory_.clear();
+  }
 }
 MediaStore::StagedMedia::~StagedMedia() { clean(); }
 
@@ -101,6 +111,7 @@ Result<MediaStore::StagedMedia> MediaStore::stage(const InputStreamFactory& sour
   std::error_code ec;
   std::filesystem::create_directories(root_ / ".import", ec);
   if (ec) return R::failure(ErrorCode::writeFailure, "Cannot create media staging storage: " + ec.message());
+  if (!withinRoot(root_, root_ / ".import")) return R::failure(ErrorCode::writeFailure, "Media staging storage resolves outside the project.");
   if (const auto available = storageAvailable(root_, source.expectedBytes.value_or(0), limits_.reserveBytes); !available)
     return R::failure(available.error().code, available.error().message);
   Id id; std::filesystem::path directory;
@@ -143,12 +154,31 @@ Result<MediaStore::StagedMedia> MediaStore::stage(const InputStreamFactory& sour
   return R::success(std::move(staged));
 }
 
-Result<AudioAsset> MediaStore::commit(StagedMedia& staged, int channels, int rate, Frame frames) {
+Result<AudioAsset> MediaStore::commit(StagedMedia& staged, int channels, int rate, Frame frames, CancellationToken* token) {
   using R = Result<AudioAsset>;
   if (staged.root_ != root_ || staged.directory_.empty() || staged.checksum_.size() != 64 || channels <= 0 || rate <= 0 || frames <= 0)
     return R::failure(ErrorCode::decodeFailure, "Only validated staged audio from this media store can be committed.");
+  if (!withinRoot(root_, staged.path_)) return R::failure(ErrorCode::readFailure, "Staged original resolves outside the project.");
+  // Decoder inspection may occur between staging and publication. Recheck the
+  // original so a replaced/modified file cannot acquire the copied checksum.
+  {
+    std::ifstream input(staged.path_, std::ios::binary);
+    if (!input) return R::failure(ErrorCode::readFailure, "Cannot verify the staged original.");
+    Sha256 sha; std::uint64_t total = 0; std::array<std::byte, 65536> buffer{};
+    while (input) {
+      if (token && token->isCancelled()) return R::failure(ErrorCode::cancelled, "Import cancelled.");
+      input.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+      const auto n = static_cast<std::size_t>(input.gcount());
+      if (n > staged.bytes_ - total) return R::failure(ErrorCode::readFailure, "Staged original changed after copying.");
+      sha.add(std::span<const std::byte>(buffer.data(), n)); total += n;
+    }
+    if (!input.eof() || input.bad() || total != staged.bytes_ || sha.finish() != staged.checksum_)
+      return R::failure(ErrorCode::readFailure, "Staged original checksum or length changed after copying.");
+  }
+  if (token && token->isCancelled()) return R::failure(ErrorCode::cancelled, "Import cancelled.");
   std::error_code ec; std::filesystem::create_directories(root_ / "media", ec);
   if (ec) return R::failure(ErrorCode::writeFailure, "Cannot create project media folder: " + ec.message());
+  if (!withinRoot(root_, root_ / "media")) return R::failure(ErrorCode::writeFailure, "Media storage resolves outside the project.");
   const auto destination = root_ / "media" / staged.id_;
   if (std::filesystem::exists(destination, ec) || ec) return R::failure(ErrorCode::duplicateId, "Media identity is already installed or inaccessible.");
   std::filesystem::rename(staged.directory_, destination, ec);
@@ -162,6 +192,8 @@ Result<void> MediaStore::removeCommitted(const AudioAsset& asset) {
   if (asset.id.size() != 32 || !std::all_of(asset.id.begin(), asset.id.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }) ||
       asset.relativePath != "media/" + asset.id + "/original")
     return Result<void>::failure(ErrorCode::invalidCommand, "Refusing removal of a path outside importer-owned media.");
+  if (!withinRoot(root_, root_ / "media" / asset.id))
+    return Result<void>::failure(ErrorCode::invalidCommand, "Refusing removal of media that resolves outside the project.");
   std::error_code ec; std::filesystem::remove_all(root_ / "media" / asset.id, ec);
   if (ec) return Result<void>::failure(ErrorCode::writeFailure, "Cannot roll back imported media: " + ec.message());
   return Result<void>::success();

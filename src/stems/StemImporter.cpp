@@ -24,6 +24,7 @@ ImportReport StemImporter::import(const std::vector<InputStreamFactory>& inputs,
         if (progress) progress({i, inputs.size(), inputs[i].displayName, bytes, inputs[i].expectedBytes});
       });
       if (!copied) { report.files[i].error = copied.error(); continue; }
+      if (progress) progress({i, inputs.size(), inputs[i].displayName, copied.value().byteCount(), inputs[i].expectedBytes, ImportPhase::decoding});
       auto audio = decoder_.inspect(copied.value().path(), token, limits_.maxWaveformBins);
       if (!audio) { report.files[i].error = audio.error(); continue; }
       const auto& metadata = audio.value();
@@ -41,9 +42,14 @@ ImportReport StemImporter::import(const std::vector<InputStreamFactory>& inputs,
   // cancellation rolls back only this batch, never pre-existing project media.
   for (std::size_t i = 0; i < inputs.size() && !token.isCancelled(); ++i) {
     if (!stages[i]) continue;
-    auto committed = store.commit(*stages[i], decoded[i].channels, decoded[i].sourceRate, decoded[i].frameCount);
-    if (!committed) report.files[i].error = committed.error();
-    else { report.files[i].asset = std::move(committed.value()); report.files[i].waveform = std::move(decoded[i].waveform); }
+    try {
+      if (progress) progress({i, inputs.size(), inputs[i].displayName, stages[i]->byteCount(), inputs[i].expectedBytes, ImportPhase::committing});
+      auto committed = store.commit(*stages[i], decoded[i].channels, decoded[i].sourceRate, decoded[i].frameCount, &token);
+      if (!committed) report.files[i].error = committed.error();
+      else { report.files[i].asset = std::move(committed.value()); report.files[i].waveform = std::move(decoded[i].waveform); }
+    } catch (const std::exception& error) {
+      report.files[i].error = Error{ErrorCode::writeFailure, "Import publication failed: " + std::string(error.what())};
+    }
   }
   if (token.isCancelled()) {
     report.cancelled = true;

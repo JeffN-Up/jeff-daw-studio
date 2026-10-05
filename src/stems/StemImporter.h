@@ -19,11 +19,13 @@ public:
   virtual Result<DecodedAudio> inspect(const std::filesystem::path& stagedOriginal,
                                        CancellationToken&, std::size_t maxWaveformBins) = 0;
 };
+enum class ImportPhase { copying, decoding, committing };
 struct ImportProgress {
   std::size_t fileIndex = 0, fileCount = 0;
   std::string displayName;
   std::uint64_t bytesCopied = 0;
   std::optional<std::uint64_t> expectedBytes;
+  ImportPhase phase = ImportPhase::copying;
 };
 using ProgressCallback = std::function<void(const ImportProgress&)>;
 struct ImportedFile {

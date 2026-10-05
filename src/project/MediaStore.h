@@ -50,7 +50,10 @@ public:
   const std::filesystem::path& root() const noexcept { return root_; }
   Result<StagedMedia> stage(const InputStreamFactory&, CancellationToken&,
                            std::function<void(std::uint64_t)> progress = {});
-  Result<AudioAsset> commit(StagedMedia&, int channels, int sourceRate, Frame frameCount);
+  // Rechecks staged byte identity before atomic publication; optional cancellation
+  // is checked while hashing, avoiding an uninterruptible large-file commit.
+  Result<AudioAsset> commit(StagedMedia&, int channels, int sourceRate, Frame frameCount,
+                            CancellationToken* cancellation = nullptr);
   // Removes only the matching importer-owned directory under this store's root.
   // Call only for unreferenced assets, e.g. rolling back a cancelled import.
   Result<void> removeCommitted(const AudioAsset&);
