@@ -4,6 +4,11 @@
 #include <cmath>
 #include <vector>
 namespace jeff::daw {
+namespace {
+// Bounds the worker's planar source window to about 16 MiB at 64 channels.
+constexpr double maxPreparedFramesPerDeviceFrame=16.0;
+constexpr int maxSourceWindowFrames=65540;
+}
 StemPlayback::StemPlayback():worker_([this]{workerLoop();}){}
 StemPlayback::~StemPlayback(){
   stopping_.store(true,std::memory_order_release);
@@ -74,7 +79,7 @@ void StemPlayback::workerLoop() noexcept {
   std::unique_ptr<PlaybackSnapshot> active;
   std::uint64_t generation=0,seenSeek=~std::uint64_t{},seenRateEpoch=~std::uint64_t{},seenTempoEpoch=~std::uint64_t{};
   double cursor=0,tempo=120,rate=48000;
-  bool playing=false;
+  bool playing=false,wasPlaying=false;
   while(!stopping_.load(std::memory_order_acquire)) {
     if(auto* p=pending_.exchange(nullptr,std::memory_order_acq_rel)) {
       active.reset(p); ++generation; activeGeneration_.store(generation,std::memory_order_release);
@@ -88,8 +93,12 @@ void StemPlayback::workerLoop() noexcept {
     if(seek!=seenSeek || re!=seenRateEpoch || te!=seenTempoEpoch) {
       cursor=requestedBeat;tempo=requestedTempo;rate=requestedRate;
       seenSeek=seek;seenRateEpoch=re;seenTempoEpoch=te;
-    } else { tempo=requestedTempo;rate=requestedRate; }
+    } else {
+      if(run&&!wasPlaying) cursor=requestedBeat;
+      tempo=requestedTempo;rate=requestedRate;
+    }
     playing=run;
+    wasPlaying=run;
     if(!active || !playing || tempo<=0 || rate<=0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));continue;
     }
@@ -109,14 +118,22 @@ void StemPlayback::workerLoop() noexcept {
         const double origin=t.placementBeats+a.originBeats;
         const double sourceStep=(tempo/active->tempoBpm())*a.sampleRate/rate;
         const double startPos=(cursor-origin)*60.0/active->tempoBpm()*a.sampleRate;
+        if(!std::isfinite(sourceStep)||sourceStep<=0||sourceStep>maxPreparedFramesPerDeviceFrame) {
+          setStatus("Prepared playback rate ratio exceeds the bounded 16:1 source window.");
+          continue;
+        }
         const double endPos=startPos+(blockFrames-1)*sourceStep;
         if(!std::isfinite(startPos)||!std::isfinite(endPos)||endPos<0||startPos>=a.frameCount) continue;
         const auto first=std::max<Frame>(0,static_cast<Frame>(std::floor(startPos)));
         const auto last=std::min<Frame>(a.frameCount-1,static_cast<Frame>(std::floor(endPos))+1);
         if(last<first) continue;
         const int count=static_cast<int>(last-first+1);
-        std::vector<std::vector<float>> planes(static_cast<std::size_t>(t.channels),std::vector<float>(static_cast<std::size_t>(count)));
-        std::vector<float*> ptrs;ptrs.reserve(t.channels);
+        if(count>maxSourceWindowFrames) {
+          setStatus("Prepared playback source window exceeds its bounded read size.");
+          continue;
+        }
+        std::vector<std::vector<float>> planes(static_cast<std::size_t>(a.channels),std::vector<float>(static_cast<std::size_t>(count)));
+        std::vector<float*> ptrs;ptrs.reserve(a.channels);
         for(auto& p:planes)ptrs.push_back(p.data());
         auto result=a.read(first,count,std::span<float* const>(ptrs.data(),ptrs.size()),token);
         if(!result) {setStatus("Prepared playback read failed: "+result.error().message);continue;}
@@ -128,7 +145,8 @@ void StemPlayback::workerLoop() noexcept {
           const auto high=std::min(low+1,count-1);const float f=static_cast<float>(position-std::floor(position));
           std::array<float,64> values{};
           for(int c=0;c<t.channels;++c) {
-            values[c]=planes[c][low]+(planes[c][high]-planes[c][low])*f;
+            const auto cacheChannel=t.firstChannel+c;
+            values[c]=planes[cacheChannel][low]+(planes[cacheChannel][high]-planes[cacheChannel][low])*f;
             samplePtrs[c]=&values[c];
           }
           PlaybackSnapshot::mixTrack(samplePtrs.data(),t.channels,t.gain,t.pan,slot.left[i],slot.right[i]);

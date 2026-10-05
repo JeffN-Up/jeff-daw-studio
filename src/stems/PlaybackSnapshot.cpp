@@ -8,8 +8,10 @@ PlaybackSnapshot::PlaybackSnapshot(double tempo, std::vector<PlaybackTrack> trac
   if(!std::isfinite(tempoBpm_) || tempoBpm_<20 || tempoBpm_>300 || tracks_.size()>64)
     throw std::invalid_argument("Invalid playback snapshot tempo or track count.");
   for(const auto& t:tracks_)
-    if(t.channels<1 || t.channels>64 || t.firstChannel<0 || t.firstChannel+t.channels>t.audio.channels ||
-       t.audio.sampleRate<1 || !std::isfinite(t.placementBeats) || !std::isfinite(t.gain) ||
+    if(t.channels<1 || t.channels>64 || t.audio.channels<1 || t.audio.channels>64 ||
+       t.firstChannel<0 || t.channels>t.audio.channels || t.firstChannel>t.audio.channels-t.channels ||
+       t.audio.sampleRate<8000 || t.audio.sampleRate>192000 || t.audio.frameCount<=0 ||
+       !std::isfinite(t.audio.originBeats) || !std::isfinite(t.placementBeats) || !std::isfinite(t.gain) ||
        !std::isfinite(t.pan) || t.pan < -1 || t.pan > 1)
       throw std::invalid_argument("Invalid prepared playback track.");
 }

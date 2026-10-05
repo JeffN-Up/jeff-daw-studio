@@ -23,6 +23,7 @@ public:
   // Adds stereo stem playback to existing output. Callback is allocation-, I/O-, and lock-free.
   void render(float* const*,int,int,const TransportBlock&) noexcept;
   std::uint64_t underruns() const noexcept { return underruns_.load(std::memory_order_relaxed); }
+  std::uint64_t snapshotGeneration() const noexcept { return activeGeneration_.load(std::memory_order_acquire); }
   std::string workerStatus() const;
 private:
   struct Slot {
