@@ -12,6 +12,7 @@ include(cmake/Dependencies.cmake)
 
 set(JDS_CORE_SOURCES
   src/audio/AudioEngine.cpp src/midi/DeviceProfile.cpp src/midi/MidiDeviceService.cpp
+  src/stems/PlaybackSnapshot.cpp src/stems/StemPlayback.cpp
   src/project/Types.cpp src/project/Project.cpp src/project/ProjectCommands.cpp
   src/project/MediaStore.cpp src/stems/StemImporter.cpp
   src/stems/TimingMap.cpp src/stems/StretchRenderer.cpp

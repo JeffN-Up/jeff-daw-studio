@@ -1,4 +1,4 @@
-add_executable(JeffDawTests FoundationTests.cpp ProjectTests.cpp StemImportTests.cpp StretchTests.cpp SyncTests.cpp ${JDS_CORE_SOURCES})
+add_executable(JeffDawTests FoundationTests.cpp ProjectTests.cpp StemImportTests.cpp StretchTests.cpp SyncTests.cpp StemPlaybackTests.cpp ${JDS_CORE_SOURCES})
 target_include_directories(JeffDawTests PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(JeffDawTests PRIVATE Catch2::Catch2WithMain signalsmith-stretch)
 include(Catch)
