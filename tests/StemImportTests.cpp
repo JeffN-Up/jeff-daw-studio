@@ -10,6 +10,12 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #ifdef JDS_TEST_JUCE_IMPORT
 #include "stems/JuceStemDecoder.h"
 #endif
@@ -81,6 +87,35 @@ using TestDecoder = FixtureDecoder;
 using TestDecoder = JuceStemDecoder;
 #endif
 std::size_t entries(const std::filesystem::path& p) { return std::filesystem::exists(p) ? std::distance(std::filesystem::directory_iterator(p), std::filesystem::directory_iterator{}) : 0; }
+class PreventDeletion {
+public:
+  void hold(const std::filesystem::path& original) {
+#ifdef _WIN32
+    handle_ = CreateFileW(original.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                          nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(handle_ != INVALID_HANDLE_VALUE);
+#else
+    directory_ = original.parent_path();
+    oldPermissions_ = std::filesystem::status(directory_).permissions();
+    std::filesystem::permissions(directory_, std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec);
+#endif
+  }
+  void release() {
+#ifdef _WIN32
+    if (handle_ != INVALID_HANDLE_VALUE) { CloseHandle(handle_); handle_ = INVALID_HANDLE_VALUE; }
+#else
+    if (!directory_.empty()) { std::filesystem::permissions(directory_, oldPermissions_); directory_.clear(); }
+#endif
+  }
+  ~PreventDeletion() { release(); }
+private:
+#ifdef _WIN32
+  HANDLE handle_ = INVALID_HANDLE_VALUE;
+#else
+  std::filesystem::path directory_;
+  std::filesystem::perms oldPermissions_{};
+#endif
+};
 }
 
 TEST_CASE("StemImportPreservesSilence", "[stem-import]") {
@@ -183,5 +218,29 @@ TEST_CASE("MediaCommitRejectsOriginalChangedAfterStaging", "[stem-import]") {
   auto result = store.commit(staged.value(), 2, 48000, 8192);
   REQUIRE_FALSE(result); REQUIRE(result.error().code == ErrorCode::readFailure); REQUIRE(entries(temp.root / "media") == 0);
 }
-
+TEST_CASE("StagedCleanupFailureReportsIdentityAndCanBeRetried", "[stem-import]") {
+  Temp temp; MediaStore store(temp.root); TestDecoder decoder; StemImporter importer(decoder); CancellationToken token;
+  bool interruptedCopy = false, cancelDecode = false;
+  SECTION("interrupted provider copy") { interruptedCopy = true; }
+  SECTION("cancelled decoder") { cancelDecode = true; }
+  SECTION("corrupt decoder") {}
+  PreventDeletion lock; bool held = false;
+  auto input = source("locked.wav", (interruptedCopy || cancelDecode) ? wav() : "garbage", interruptedCopy);
+  auto report = importer.import({input}, store, token, [&](const ImportProgress& p) {
+    if (!held && ((interruptedCopy && p.phase == ImportPhase::copying && p.bytesCopied > 0) || (!interruptedCopy && p.phase == ImportPhase::decoding))) {
+      const auto directory = std::filesystem::directory_iterator(temp.root / ".import")->path();
+      lock.hold(directory / "original"); held = true;
+      if (cancelDecode) token.cancel();
+    }
+  });
+  REQUIRE(held); REQUIRE(report.cancelled == cancelDecode); REQUIRE_FALSE(report.files[0].asset); REQUIRE(report.files[0].error);
+  REQUIRE(report.files[0].unresolvedStaging);
+  const auto pending = *report.files[0].unresolvedStaging;
+  REQUIRE(pending.mediaId.size() == 32); REQUIRE(pending.relativeDirectory == ".import/" + pending.mediaId);
+  REQUIRE(pending.error.code == ErrorCode::writeFailure);
+  REQUIRE(std::filesystem::exists(store.root() / pending.relativeDirectory / "original"));
+  REQUIRE_FALSE(store.retryStagedCleanup(pending));
+  lock.release(); REQUIRE(store.retryStagedCleanup(pending));
+  REQUIRE(entries(temp.root / ".import") == 0); REQUIRE(entries(temp.root / "media") == 0);
+}
 

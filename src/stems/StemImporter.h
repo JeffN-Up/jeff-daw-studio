@@ -33,6 +33,7 @@ struct ImportedFile {
   std::optional<AudioAsset> asset;
   std::optional<Error> error;
   std::vector<WaveformBin> waveform;
+  std::optional<PendingStagedCleanup> unresolvedStaging;
 };
 struct ImportReport {
   std::vector<ImportedFile> files;

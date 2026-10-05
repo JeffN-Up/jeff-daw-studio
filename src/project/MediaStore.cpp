@@ -95,15 +95,21 @@ MediaStore::StagedMedia& MediaStore::StagedMedia::operator=(StagedMedia&& other)
 }
 void MediaStore::StagedMedia::clean() noexcept {
   if (!directory_.empty()) {
-    if (withinRoot(root_, directory_)) { std::error_code ec; std::filesystem::remove_all(directory_, ec); }
-    directory_.clear();
+    // Best-effort fallback only. Worker exits use explicit discard() and retain
+    // failure/retry information instead of depending on this destructor.
+    if (withinRoot(root_, directory_)) {
+      std::error_code ec; std::filesystem::remove_all(directory_, ec);
+      if (!ec) directory_.clear();
+    }
   }
 }
 MediaStore::StagedMedia::~StagedMedia() { clean(); }
 
 Result<MediaStore::StagedMedia> MediaStore::stage(const InputStreamFactory& source, CancellationToken& token,
-                                               std::function<void(std::uint64_t)> progress) {
+                                               std::function<void(std::uint64_t)> progress,
+                                               std::optional<PendingStagedCleanup>* unresolvedCleanup) {
   using R = Result<StagedMedia>;
+  if (unresolvedCleanup) unresolvedCleanup->reset();
   if (token.isCancelled()) return R::failure(ErrorCode::cancelled, "Import cancelled.");
   if (!source.open) return R::failure(ErrorCode::readFailure, "Input provider has no stream factory.");
   if (source.expectedBytes && *source.expectedBytes > limits_.maxFileBytes)
@@ -123,35 +129,54 @@ Result<MediaStore::StagedMedia> MediaStore::stage(const InputStreamFactory& sour
   }
   if (directory.empty()) return R::failure(ErrorCode::duplicateId, "Cannot allocate unique media identity.");
   StagedMedia staged(root_, directory, std::move(id));
-  auto input = source.open();
-  if (!input) return R::failure(input.error().code, input.error().message);
-  if (!input.value()) return R::failure(ErrorCode::readFailure, "Input provider returned an empty stream.");
-  std::ofstream output(staged.path_, std::ios::binary | std::ios::trunc);
-  if (!output) return R::failure(ErrorCode::writeFailure, "Cannot open staged media for writing.");
-  Sha256 sha; std::array<std::byte, 65536> buffer{};
-  while (true) {
-    if (token.isCancelled()) return R::failure(ErrorCode::cancelled, "Import cancelled.");
-    auto read = input.value()->read(buffer);
-    if (!read) return R::failure(read.error().code, read.error().message);
-    const auto n = read.value();
-    if (n > buffer.size()) return R::failure(ErrorCode::readFailure, "Input provider returned an invalid read size.");
-    if (n == 0) break;
-    if (n > limits_.maxFileBytes - staged.bytes_) return R::failure(ErrorCode::storageLimit, "File exceeds the configured import size limit.");
-    if (const auto available = storageAvailable(root_, n, limits_.reserveBytes); !available)
-      return R::failure(available.error().code, available.error().message);
-    output.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(n));
-    if (!output) return R::failure(ErrorCode::writeFailure, "Staged media write failed.");
-    sha.add(std::span<const std::byte>(buffer.data(), n)); staged.bytes_ += n;
-    if (progress) progress(staged.bytes_);
+  std::unique_ptr<InputStream> input;
+  std::ofstream output;
+  auto fail = [&](ErrorCode code, std::string message) {
+    // Release our own handles before deleting, especially on Windows.
+    if (output.is_open()) output.close();
+    input.reset();
+    const auto cleaned = discard(staged);
+    if (!cleaned) {
+      PendingStagedCleanup pending{staged.id_, ".import/" + staged.id_, cleaned.error()};
+      if (unresolvedCleanup) *unresolvedCleanup = pending;
+      message += " Staging cleanup failed for " + pending.relativeDirectory + ": " + pending.error.message;
+    }
+    return R::failure(code, std::move(message));
+  };
+  try {
+    auto opened = source.open();
+    if (!opened) return fail(opened.error().code, opened.error().message);
+    input = std::move(opened.value());
+    if (!input) return fail(ErrorCode::readFailure, "Input provider returned an empty stream.");
+    output.open(staged.path_, std::ios::binary | std::ios::trunc);
+    if (!output) return fail(ErrorCode::writeFailure, "Cannot open staged media for writing.");
+    Sha256 sha; std::array<std::byte, 65536> buffer{};
+    while (true) {
+      if (token.isCancelled()) return fail(ErrorCode::cancelled, "Import cancelled.");
+      auto read = input->read(buffer);
+      if (!read) return fail(read.error().code, read.error().message);
+      const auto n = read.value();
+      if (n > buffer.size()) return fail(ErrorCode::readFailure, "Input provider returned an invalid read size.");
+      if (n == 0) break;
+      if (n > limits_.maxFileBytes - staged.bytes_) return fail(ErrorCode::storageLimit, "File exceeds the configured import size limit.");
+      if (const auto available = storageAvailable(root_, n, limits_.reserveBytes); !available)
+        return fail(available.error().code, available.error().message);
+      output.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(n));
+      if (!output) return fail(ErrorCode::writeFailure, "Staged media write failed.");
+      sha.add(std::span<const std::byte>(buffer.data(), n)); staged.bytes_ += n;
+      if (progress) progress(staged.bytes_);
+    }
+    if (token.isCancelled()) return fail(ErrorCode::cancelled, "Import cancelled.");
+    output.close();
+    if (!output) return fail(ErrorCode::writeFailure, "Cannot finish staged media write.");
+    if (source.expectedBytes && staged.bytes_ != *source.expectedBytes)
+      return fail(ErrorCode::readFailure, "Input provider length changed or the transfer was incomplete.");
+    if (staged.bytes_ == 0) return fail(ErrorCode::readFailure, "Input file is empty.");
+    staged.checksum_ = sha.finish();
+    return R::success(std::move(staged));
+  } catch (const std::exception& error) {
+    return fail(ErrorCode::readFailure, "Staging failed: " + std::string(error.what()));
   }
-  if (token.isCancelled()) return R::failure(ErrorCode::cancelled, "Import cancelled.");
-  output.close();
-  if (!output) return R::failure(ErrorCode::writeFailure, "Cannot finish staged media write.");
-  if (source.expectedBytes && staged.bytes_ != *source.expectedBytes)
-    return R::failure(ErrorCode::readFailure, "Input provider length changed or the transfer was incomplete.");
-  if (staged.bytes_ == 0) return R::failure(ErrorCode::readFailure, "Input file is empty.");
-  staged.checksum_ = sha.finish();
-  return R::success(std::move(staged));
 }
 
 Result<AudioAsset> MediaStore::commit(StagedMedia& staged, int channels, int rate, Frame frames, CancellationToken* token) {
@@ -197,5 +222,20 @@ Result<void> MediaStore::removeCommitted(const AudioAsset& asset) {
   std::error_code ec; std::filesystem::remove_all(root_ / "media" / asset.id, ec);
   if (ec) return Result<void>::failure(ErrorCode::writeFailure, "Cannot roll back imported media: " + ec.message());
   return Result<void>::success();
+}
+Result<void> MediaStore::retryStagedCleanup(const PendingStagedCleanup& pending) {
+  if (pending.mediaId.size() != 32 || !std::all_of(pending.mediaId.begin(), pending.mediaId.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }) ||
+      pending.relativeDirectory != ".import/" + pending.mediaId || !withinRoot(root_, root_ / pending.relativeDirectory))
+    return Result<void>::failure(ErrorCode::invalidCommand, "Refusing staged cleanup outside importer-owned storage.");
+  std::error_code ec; std::filesystem::remove_all(root_ / pending.relativeDirectory, ec);
+  if (ec) return Result<void>::failure(ErrorCode::writeFailure, "Cannot discard staged media " + pending.relativeDirectory + ": " + ec.message());
+  return Result<void>::success();
+}
+Result<void> MediaStore::discard(StagedMedia& staged) {
+  if (staged.root_ != root_) return Result<void>::failure(ErrorCode::invalidCommand, "Stage belongs to a different media store.");
+  if (staged.directory_.empty()) return Result<void>::success();
+  const auto cleaned = retryStagedCleanup({staged.id_, ".import/" + staged.id_, {ErrorCode::writeFailure, {}}});
+  if (cleaned) staged.directory_.clear();
+  return cleaned;
 }
 } // namespace jeff::daw

@@ -25,10 +25,18 @@ struct MediaStoreLimits {
   std::uint64_t maxFileBytes = 4ULL * 1024 * 1024 * 1024;
   std::uint64_t reserveBytes = 16ULL * 1024 * 1024;
 };
+// Recovery information is retained in the import report if storage refuses
+// staging deletion. Retry it against the same MediaStore after releasing locks.
+struct PendingStagedCleanup {
+  Id mediaId;
+  std::string relativeDirectory;
+  Error error;
+};
 
 class MediaStore {
 public:
-  // A stage exclusively owns its temporary directory, removed unless committed.
+  // A stage exclusively owns its temporary directory. Explicit discard reports
+  // failed removal; destruction only provides a best-effort fallback.
   class StagedMedia {
   public:
     StagedMedia(StagedMedia&&) noexcept;
@@ -37,6 +45,7 @@ public:
     const std::filesystem::path& path() const noexcept { return path_; }
     const std::string& checksum() const noexcept { return checksum_; }
     std::uint64_t byteCount() const noexcept { return bytes_; }
+    const Id& id() const noexcept { return id_; }
   private:
     friend class MediaStore;
     StagedMedia(std::filesystem::path root, std::filesystem::path directory, Id id);
@@ -49,7 +58,11 @@ public:
   explicit MediaStore(std::filesystem::path projectRoot, MediaStoreLimits limits = {});
   const std::filesystem::path& root() const noexcept { return root_; }
   Result<StagedMedia> stage(const InputStreamFactory&, CancellationToken&,
-                           std::function<void(std::uint64_t)> progress = {});
+                           std::function<void(std::uint64_t)> progress = {},
+                           std::optional<PendingStagedCleanup>* unresolvedCleanup = nullptr);
+  // Explicit fallible cleanup; failure keeps stage ownership/identity intact.
+  Result<void> discard(StagedMedia&);
+  Result<void> retryStagedCleanup(const PendingStagedCleanup&);
   // Rechecks staged byte identity before atomic publication; optional cancellation
   // is checked while hashing, avoiding an uninterruptible large-file commit.
   Result<AudioAsset> commit(StagedMedia&, int channels, int sourceRate, Frame frameCount,

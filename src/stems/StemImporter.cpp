@@ -22,10 +22,11 @@ ImportReport StemImporter::import(const std::vector<InputStreamFactory>& inputs,
     try {
       auto copied = store.stage(inputs[i], token, [&](std::uint64_t bytes) {
         if (progress) progress({i, inputs.size(), inputs[i].displayName, bytes, inputs[i].expectedBytes});
-      });
+      }, &report.files[i].unresolvedStaging);
       if (!copied) { report.files[i].error = copied.error(); continue; }
-      if (progress) progress({i, inputs.size(), inputs[i].displayName, copied.value().byteCount(), inputs[i].expectedBytes, ImportPhase::decoding});
-      auto audio = decoder_.inspect(copied.value().path(), token, limits_.maxWaveformBins);
+      stages[i].emplace(std::move(copied.value()));
+      if (progress) progress({i, inputs.size(), inputs[i].displayName, stages[i]->byteCount(), inputs[i].expectedBytes, ImportPhase::decoding});
+      auto audio = decoder_.inspect(stages[i]->path(), token, limits_.maxWaveformBins);
       if (!audio) { report.files[i].error = audio.error(); continue; }
       const auto& metadata = audio.value();
       bool valid = metadata.channels > 0 && metadata.channels <= 64 && metadata.sourceRate > 0 && metadata.frameCount > 0 &&
@@ -33,7 +34,7 @@ ImportReport StemImporter::import(const std::vector<InputStreamFactory>& inputs,
       for (const auto& bin : metadata.waveform)
         valid = valid && std::isfinite(bin.minimum) && std::isfinite(bin.maximum) && std::isfinite(bin.rms) && bin.minimum <= bin.maximum && bin.rms >= 0;
       if (!valid) { report.files[i].error = Error{ErrorCode::decodeFailure, "Decoder returned invalid audio metadata or waveform."}; continue; }
-      stages[i].emplace(std::move(copied.value())); decoded[i] = std::move(audio.value());
+      decoded[i] = std::move(audio.value());
     } catch (const std::exception& error) {
       report.files[i].error = Error{ErrorCode::readFailure, "Import failed: " + std::string(error.what())};
     }
@@ -41,7 +42,7 @@ ImportReport StemImporter::import(const std::vector<InputStreamFactory>& inputs,
   // Publication is delayed until copying and full decoding have finished. A late
   // cancellation rolls back only this batch, never pre-existing project media.
   for (std::size_t i = 0; i < inputs.size() && !token.isCancelled(); ++i) {
-    if (!stages[i]) continue;
+    if (!stages[i] || report.files[i].error) continue;
     try {
       if (progress) progress({i, inputs.size(), inputs[i].displayName, stages[i]->byteCount(), inputs[i].expectedBytes, ImportPhase::committing});
       auto committed = store.commit(*stages[i], decoded[i].channels, decoded[i].sourceRate, decoded[i].frameCount, &token);
@@ -60,6 +61,18 @@ ImportReport StemImporter::import(const std::vector<InputStreamFactory>& inputs,
         file.asset.reset(); file.waveform.clear();
       }
       if (!file.error) file.error = Error{ErrorCode::cancelled, "Import batch cancelled."};
+    }
+  }
+  // Explicitly discard all uncommitted copies, including rejected decoder input,
+  // failed publication and cancellation. Destruction alone cannot report errors.
+  for (std::size_t i = 0; i < stages.size(); ++i) {
+    if (!stages[i]) continue;
+    const auto cleaned = store.discard(*stages[i]);
+    if (!cleaned) {
+      auto& file = report.files[i];
+      file.unresolvedStaging = PendingStagedCleanup{stages[i]->id(), ".import/" + stages[i]->id(), cleaned.error()};
+      if (file.error) file.error->message += " Staging cleanup failed: " + cleaned.error().message;
+      else file.error = cleaned.error();
     }
   }
   return report;
