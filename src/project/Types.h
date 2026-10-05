@@ -12,7 +12,10 @@ namespace jeff::daw {
 using Id = std::string;
 using Frame = std::int64_t;
 
-enum class ErrorCode { invalidProject, invalidTimingMap, missingEntity, duplicateId, invalidCommand, cancelled };
+enum class ErrorCode {
+  invalidProject, invalidTimingMap, missingEntity, duplicateId, invalidCommand, cancelled,
+  readFailure, writeFailure, storageLimit, decodeFailure
+};
 
 struct Error {
   ErrorCode code;
