@@ -12,6 +12,8 @@ include(cmake/Dependencies.cmake)
 
 set(JDS_CORE_SOURCES
   src/audio/AudioEngine.cpp src/midi/DeviceProfile.cpp src/midi/MidiDeviceService.cpp
+  src/project/Types.cpp src/project/Project.cpp src/project/ProjectCommands.cpp
+  src/stems/TimingMap.cpp
   src/transport/TransportClock.cpp src/ui/OrbaLayout.cpp src/ui/OrbaMirrorModel.cpp
   src/ui/DeviceCenterModel.cpp)
 list(TRANSFORM JDS_CORE_SOURCES PREPEND "${PROJECT_SOURCE_DIR}/")
