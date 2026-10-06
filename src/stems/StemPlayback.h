@@ -24,6 +24,12 @@ public:
   void render(float* const*,int,int,const TransportBlock&) noexcept;
   std::uint64_t underruns() const noexcept { return underruns_.load(std::memory_order_relaxed); }
   std::uint64_t snapshotGeneration() const noexcept { return activeGeneration_.load(std::memory_order_acquire); }
+  int bufferedBlocks() const noexcept {
+    int count=0;
+    for(const auto& slot:slots_)
+      if(slot.ready.load(std::memory_order_acquire)) ++count;
+    return count;
+  }
   std::string workerStatus() const;
 private:
   struct Slot {

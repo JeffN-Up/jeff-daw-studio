@@ -87,11 +87,12 @@ Captured renderAt(StemPlayback& playback,TransportClock& clock,double beat,doubl
   float l=0,r=0;float* out[]{&l,&r};
   clock.setPlaying(false);clock.seekBeats(beat);auto paused=clock.process(1);playback.render(out,2,1,paused);
   clock.setPlaying(true);auto prime=clock.process(1);playback.render(out,2,1,prime);
-  for(int attempt=0;attempt<200;++attempt){
+  // Preparation is asynchronous. Do not advance musical time while waiting:
+  // doing so can make the first prepared block stale on a slower worker.
+  for(int attempt=0;attempt<200&&playback.bufferedBlocks()==0;++attempt)
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    auto block=clock.process(1);l=r=0;playback.render(out,2,1,block);
-    if(std::abs(l)+std::abs(r)>1e-5f)return{l,r,block.startBeat,true};
-  }
+  const auto requested=clock.process(1);l=r=0;playback.render(out,2,1,requested);
+  if(std::abs(l)+std::abs(r)>1e-5f)return{l,r,requested.startBeat,true};
   (void)rate;return{};
 }
 }
