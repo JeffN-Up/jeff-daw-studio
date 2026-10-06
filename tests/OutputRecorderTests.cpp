@@ -19,6 +19,7 @@ TEST_CASE("Live recorder writes stereo PCM without callback file IO", "[recordin
   REQUIRE(recorder.stop());
   std::ifstream in(path, std::ios::binary);
   std::string bytes((std::istreambuf_iterator<char>(in)), {});
+  in.close();
   REQUIRE(bytes.substr(0, 4) == "RIFF");
   REQUIRE(bytes.size() == 44 + 128 * 6);
   REQUIRE(bytes.substr(44, 3) != bytes.substr(47, 3));
