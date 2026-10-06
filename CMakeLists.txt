@@ -25,7 +25,7 @@ if(JDS_BUILD_APP)
   juce_add_gui_app(JeffDawStudio PRODUCT_NAME "Jeff DAW Studio" COMPANY_NAME "Jeffrey Chapin" VERSION ${PROJECT_VERSION})
   target_sources(JeffDawStudio PRIVATE src/app/Main.cpp src/app/MainWindow.cpp src/app/RootComponent.cpp
     src/audio/JuceAudioBackend.cpp src/midi/JuceMidiBackend.cpp src/stems/JuceStemDecoder.cpp src/stems/JuceFlacIntegrity.cpp src/ui/OrbaMirrorComponent.cpp
-    src/ui/TransportComponent.cpp src/ui/DeviceCenterComponent.cpp ${JDS_CORE_SOURCES})
+    src/ui/TransportComponent.cpp src/ui/DeviceCenterComponent.cpp src/ui/StemWorkspaceComponent.cpp ${JDS_CORE_SOURCES})
   target_include_directories(JeffDawStudio PRIVATE src)
   target_compile_definitions(JeffDawStudio PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1)
   target_link_libraries(JeffDawStudio PRIVATE signalsmith-stretch juce::juce_audio_utils juce::juce_gui_extra
