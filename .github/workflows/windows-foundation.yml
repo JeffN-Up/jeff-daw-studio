@@ -1,7 +1,7 @@
 name: Windows Foundation
 on:
   push:
-    branches: [main, feature/audio-midi-foundation, feature/stem-import-workflow]
+    branches: [main, feature/audio-midi-foundation, feature/stem-import-workflow, feature/usable-windows-workspace]
   pull_request:
 jobs:
   build:
@@ -21,5 +21,5 @@ jobs:
         run: cmake --install build --config Release --prefix package
       - uses: actions/upload-artifact@v4
         with:
-          name: Jeff-DAW-Studio-Windows-Stem-Preview
+          name: Jeff-DAW-Studio-Windows-Workspace
           path: package

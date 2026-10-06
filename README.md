@@ -2,6 +2,19 @@
 
 Free, open-source Windows DAW foundation for Artiphon Orba 1/2, Behringer JT-4000 Micro, Windows audio inputs, and virtual keyboard/pad performance.
 
+## Windows workspace (October 6, 2026)
+
+The `feature/usable-windows-workspace` branch connects the stem services to the native app. Start with **Load Demo**, then **Play** to hear four generated tracks. Use **Audio Settings** to select the output device. **Jam + Devices** retains the playable Orba mirror and hardware MIDI audition.
+
+- Import WAV/AIFF/FLAC/MP3 files with real waveform previews and playable tracks.
+- Adjust volume, pan, mute and solo. Click **Save** after mix changes.
+- **Open** restores a saved `project.json` with original media verified by SHA-256.
+- **Project Folder** opens the local project directory under Documents/Jeff DAW Projects. Keep the complete folder, including media, when moving a project. This is a local folder workflow, not a portable checkpoint ZIP or Drive upload.
+- **Export Mix** writes a 48 kHz/24-bit stereo WAV. Choose a new filename.
+- **Record Output** captures the app output to the project recordings folder; click **Finish Recording** to finalize the WAV. It records the audition instrument and mixed stems, not microphone input. A capture overflow or device-rate change rejects the partial take.
+
+Advanced timing controls, Android, microphone recording, MIDI clips, effects, looping and recovery/autosave remain pending. Native Windows CI and ThinkCentre hardware checks must run before this branch is called a Windows release.
+
 ## Current foundation
 
 - Native JUCE/C++ application with WASAPI/optional ASIO device access.
@@ -20,12 +33,12 @@ Free, open-source Windows DAW foundation for Artiphon Orba 1/2, Behringer JT-400
 ## Build and run
 
 ```powershell
-git clone <repository-url> jeff-daw-studio
+git clone --branch feature/usable-windows-workspace https://github.com/JeffN-Up/jeff-daw-studio.git
 cd jeff-daw-studio
 cmake -S . -B build -DJDS_BUILD_TESTS=ON
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
-build\JeffDawStudio_artefacts\Release\JeffDawStudio.exe
+& ".\build\JeffDawStudio_artefacts\Release\Jeff DAW Studio.exe"
 ```
 
 Install/stage the portable folder with:
