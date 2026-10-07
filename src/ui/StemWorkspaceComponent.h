@@ -1,0 +1,6 @@
+#pragma once
+#include <juce_gui_extra/juce_gui_extra.h>
+namespace jeff::daw {
+class TrackLaneComponent final : public juce::Component { public: explicit TrackLaneComponent(juce::File); void paint(juce::Graphics&) override; void resized() override; private: juce::File source_; juce::Label name_; juce::TextButton mute_{"M"},solo_{"S"}; juce::Slider gain_,pan_; };
+class StemWorkspaceComponent final : public juce::Component, public juce::FileDragAndDropTarget { public: StemWorkspaceComponent(); void paint(juce::Graphics&) override; void resized() override; bool isInterestedInFileDrag(const juce::StringArray&) override; void filesDropped(const juce::StringArray&,int,int) override; private: void chooseFiles(); void addFiles(const juce::StringArray&); void relayoutTracks(); static bool supported(const juce::File&); juce::Label heading_,subheading_,tempoLabel_,status_; juce::TextButton addStems_{"+ Add Stems"},play_{"Play"},autoSync_{"Auto Sync"},exportMix_{"Export Mix"},saveProject_{"Save Project"}; juce::ComboBox timingMode_; juce::Slider tempo_; juce::Viewport viewport_; juce::Component trackContent_; juce::OwnedArray<TrackLaneComponent> tracks_; std::unique_ptr<juce::FileChooser> chooser_; };
+}

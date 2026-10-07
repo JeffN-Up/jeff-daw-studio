@@ -1,2 +1,8 @@
 /.worktrees/
 /.codex/
+/.superpowers/
+/build/
+/out/
+/.vs/
+*.user
+*.zip
