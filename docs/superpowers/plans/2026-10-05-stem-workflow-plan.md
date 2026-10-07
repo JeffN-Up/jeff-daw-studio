@@ -98,10 +98,10 @@ Use `ctest -R <test-name>` for the failing/passing cycle; all tests run at relea
 **Files:** Create `src/stems/WavExporter.h/.cpp`, `tests/ExportTests.cpp`.
 **Interfaces:** `exportMix/exportTracks(const PlaybackSnapshot&, ExportRange, OutputTarget&, CancellationToken&, ProgressCallback) -> Result<ExportReport>`; use the Task 5 render rules with metronome/audition disabled.
 
-- [ ] Add failing `ExportReimportsAligned` comparing impulse positions and PCM content; mix respects mute/solo, track export respects mute and ignores solo. Test filename collisions and output failure.
-- [ ] Run tests to confirm failure.
-- [ ] Implement stereo WAV export at 48kHz/24-bit, common range for all tracks, atomic staged output, cancellation cleanup, clipping indication, and explicit UI overwrite consent.
-- [ ] Run tests; commit `feat: export stem mixes and aligned WAV tracks`.
+- [x] Add failing `ExportReimportsAligned` comparing impulse positions and PCM content; mix respects mute/solo, track export respects mute and ignores solo. Test filename collisions and output failure.
+- [x] Run tests to confirm failure.
+- [x] Implement stereo WAV export at 48kHz/24-bit, common range for all tracks, atomic staged output, cancellation cleanup, clipping indication, and explicit UI overwrite consent.
+- [x] Run tests; commit `feat: export stem mixes and aligned WAV tracks`.
 
 ### Task 7: Save, recovery, and portable checkpoints
 
