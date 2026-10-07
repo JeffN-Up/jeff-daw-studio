@@ -108,10 +108,10 @@ Use `ctest -R <test-name>` for the failing/passing cycle; all tests run at relea
 **Files:** Create `src/project/ProjectSerializer.h/.cpp`, `src/checkpoint/CheckpointService.h/.cpp`, `tests/CheckpointTests.cpp`.
 **Interfaces:** `save/loadProject(path) -> Result<Project>` with atomic save; `exportCheckpoint(const Project&, MediaStore&, OutputTarget&, CancellationToken&) -> Result<CheckpointInfo>`; `importCheckpoint(InputStream&, LocalProjectStore&, CancellationToken&) -> Result<ImportDecision>`. Define safe ZIP package `.jdsproject`, JSON schema v1, original media, SHA-256 manifest, revision UUID and parent UUID; rebuild caches.
 
-- [ ] Add failing `CheckpointRoundTrip`, `UnsupportedSchemaDoesNotReplace`, `CheckpointConflictKeepsBoth`, `PackageTraversalRejected`, and checksum/missing-media/interrupted-write tests.
-- [ ] Run tests to confirm failure.
-- [ ] Implement validation before installation, extraction byte/entry bounds, atomic promotion, rotating recovery, unknown-field preservation, and save-as-copy conflict decisions. Record playhead and all timing/group/mixer data; keep hardware settings local.
-- [ ] Run tests; commit `feat: save portable recoverable music checkpoints`.
+- [x] Add failing `CheckpointRoundTrip`, `UnsupportedSchemaDoesNotReplace`, `CheckpointConflictKeepsBoth`, `PackageTraversalRejected`, and checksum/missing-media/interrupted-write tests.
+- [x] Run tests to confirm failure.
+- [x] Implement validation before installation, extraction byte/entry bounds, atomic promotion, rotating recovery, unknown-field preservation, and save-as-copy conflict decisions. Record playhead and all timing/group/mixer data; keep hardware settings local.
+- [x] Run tests; commit `feat: save portable recoverable music checkpoints`.
 
 ### Task 8: Windows Stem Tracks workspace
 

@@ -1,4 +1,16 @@
 include(FetchContent)
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+set(JSON_Install OFF CACHE INTERNAL "")
+FetchContent_Declare(json
+  URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+  URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(json)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(INSTALL_PROJECT OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(miniz GIT_REPOSITORY https://github.com/richgel999/miniz.git
+  GIT_TAG 77d0dce8627735138c51770d1799a1ef48f2117d GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(miniz)
 # Header-only pitch-preserving renderer; commits pin both the release and its
 # FFT dependency. Local builds may supply FetchContent source overrides.
 set(SIGNALSMITH_USE_ACCELERATE OFF CACHE BOOL "Portable Signalsmith FFT" FORCE)
